@@ -1,21 +1,18 @@
 package com.example.data
 
+import android.content.ContentValues
 import android.content.Context
-import androidx.room.Dao
-import androidx.room.Database
-import androidx.room.Entity
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
-import androidx.room.PrimaryKey
-import androidx.room.Query
-import androidx.room.Room
-import androidx.room.RoomDatabase
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import java.io.File
 
-@Entity(tableName = "cached_pdfs")
 data class CachedPdfEntity(
-    @PrimaryKey val sha256Hash: String,
+    val sha256Hash: String,
     val originalFileName: String,
     val formatExtension: String,
     val originalSizeBytes: Long,
@@ -30,74 +27,176 @@ data class CachedPdfEntity(
     val cacheHitCount: Int = 0
 )
 
-@Dao
-interface CachedPdfDao {
-    @Query("SELECT * FROM cached_pdfs ORDER BY lastOpenedAtEpochMs DESC")
-    fun observeAllCachedPdfs(): Flow<List<CachedPdfEntity>>
+/**
+ * Robust, lightweight native SQLite database without KSP or heavy code-generation plugins.
+ * Eliminates ApplicationManager.getApplication() CI crashes while keeping 100% functionality.
+ */
+class CachedPdfDatabaseHelper(context: Context) : SQLiteOpenHelper(
+    context.applicationContext,
+    "docprism_pdf_cache_native.db",
+    null,
+    1
+) {
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS cached_pdfs (
+                sha256Hash TEXT PRIMARY KEY,
+                originalFileName TEXT NOT NULL,
+                formatExtension TEXT NOT NULL,
+                originalSizeBytes INTEGER NOT NULL,
+                pdfSizeBytes INTEGER NOT NULL,
+                localPdfPath TEXT NOT NULL,
+                pageCount INTEGER NOT NULL,
+                fitToWidthApplied INTEGER NOT NULL,
+                scriptsDetected TEXT NOT NULL,
+                serverPurgeVerified INTEGER NOT NULL,
+                convertedAtEpochMs INTEGER NOT NULL,
+                lastOpenedAtEpochMs INTEGER NOT NULL,
+                cacheHitCount INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+    }
 
-    @Query("SELECT * FROM cached_pdfs WHERE sha256Hash = :sha256Hash LIMIT 1")
-    suspend fun getBySha256(sha256Hash: String): CachedPdfEntity?
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL("DROP TABLE IF EXISTS cached_pdfs")
+        onCreate(db)
+    }
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertOrReplace(entity: CachedPdfEntity)
-
-    @Query("UPDATE cached_pdfs SET cacheHitCount = cacheHitCount + 1, lastOpenedAtEpochMs = :nowMs WHERE sha256Hash = :sha256Hash")
-    suspend fun recordCacheHit(sha256Hash: String, nowMs: Long = System.currentTimeMillis())
-
-    @Query("DELETE FROM cached_pdfs WHERE sha256Hash = :sha256Hash")
-    suspend fun deleteByHash(sha256Hash: String)
-
-    @Query("DELETE FROM cached_pdfs")
-    suspend fun clearAll()
-}
-
-@Database(entities = [CachedPdfEntity::class], version = 2, exportSchema = false)
-abstract class CachedPdfDatabase : RoomDatabase() {
-    abstract fun cachedPdfDao(): CachedPdfDao
-
-    companion object {
-        @Volatile
-        private var INSTANCE: CachedPdfDatabase? = null
-
-        fun getInstance(context: Context): CachedPdfDatabase {
-            return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    CachedPdfDatabase::class.java,
-                    "docprism_pdf_cache.db"
-                ).fallbackToDestructiveMigration(dropAllTables = true).build()
-                INSTANCE = instance
-                instance
+    fun getAllCachedPdfs(): List<CachedPdfEntity> {
+        val list = mutableListOf<CachedPdfEntity>()
+        val db = readableDatabase
+        val cursor = db.rawQuery(
+            "SELECT * FROM cached_pdfs ORDER BY lastOpenedAtEpochMs DESC",
+            null
+        )
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                list.add(
+                    CachedPdfEntity(
+                        sha256Hash = c.getString(c.getColumnIndexOrThrow("sha256Hash")),
+                        originalFileName = c.getString(c.getColumnIndexOrThrow("originalFileName")),
+                        formatExtension = c.getString(c.getColumnIndexOrThrow("formatExtension")),
+                        originalSizeBytes = c.getLong(c.getColumnIndexOrThrow("originalSizeBytes")),
+                        pdfSizeBytes = c.getLong(c.getColumnIndexOrThrow("pdfSizeBytes")),
+                        localPdfPath = c.getString(c.getColumnIndexOrThrow("localPdfPath")),
+                        pageCount = c.getInt(c.getColumnIndexOrThrow("pageCount")),
+                        fitToWidthApplied = c.getInt(c.getColumnIndexOrThrow("fitToWidthApplied")) == 1,
+                        scriptsDetected = c.getString(c.getColumnIndexOrThrow("scriptsDetected")),
+                        serverPurgeVerified = c.getInt(c.getColumnIndexOrThrow("serverPurgeVerified")) == 1,
+                        convertedAtEpochMs = c.getLong(c.getColumnIndexOrThrow("convertedAtEpochMs")),
+                        lastOpenedAtEpochMs = c.getLong(c.getColumnIndexOrThrow("lastOpenedAtEpochMs")),
+                        cacheHitCount = c.getInt(c.getColumnIndexOrThrow("cacheHitCount"))
+                    )
+                )
             }
         }
+        return list
+    }
+
+    fun getBySha256(hash: String): CachedPdfEntity? {
+        val db = readableDatabase
+        val cursor = db.rawQuery(
+            "SELECT * FROM cached_pdfs WHERE sha256Hash = ? LIMIT 1",
+            arrayOf(hash)
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                CachedPdfEntity(
+                    sha256Hash = c.getString(c.getColumnIndexOrThrow("sha256Hash")),
+                    originalFileName = c.getString(c.getColumnIndexOrThrow("originalFileName")),
+                    formatExtension = c.getString(c.getColumnIndexOrThrow("formatExtension")),
+                    originalSizeBytes = c.getLong(c.getColumnIndexOrThrow("originalSizeBytes")),
+                    pdfSizeBytes = c.getLong(c.getColumnIndexOrThrow("pdfSizeBytes")),
+                    localPdfPath = c.getString(c.getColumnIndexOrThrow("localPdfPath")),
+                    pageCount = c.getInt(c.getColumnIndexOrThrow("pageCount")),
+                    fitToWidthApplied = c.getInt(c.getColumnIndexOrThrow("fitToWidthApplied")) == 1,
+                    scriptsDetected = c.getString(c.getColumnIndexOrThrow("scriptsDetected")),
+                    serverPurgeVerified = c.getInt(c.getColumnIndexOrThrow("serverPurgeVerified")) == 1,
+                    convertedAtEpochMs = c.getLong(c.getColumnIndexOrThrow("convertedAtEpochMs")),
+                    lastOpenedAtEpochMs = c.getLong(c.getColumnIndexOrThrow("lastOpenedAtEpochMs")),
+                    cacheHitCount = c.getInt(c.getColumnIndexOrThrow("cacheHitCount"))
+                )
+            } else {
+                null
+            }
+        }
+    }
+
+    fun insertOrReplace(entity: CachedPdfEntity) {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put("sha256Hash", entity.sha256Hash)
+            put("originalFileName", entity.originalFileName)
+            put("formatExtension", entity.formatExtension)
+            put("originalSizeBytes", entity.originalSizeBytes)
+            put("pdfSizeBytes", entity.pdfSizeBytes)
+            put("localPdfPath", entity.localPdfPath)
+            put("pageCount", entity.pageCount)
+            put("fitToWidthApplied", if (entity.fitToWidthApplied) 1 else 0)
+            put("scriptsDetected", entity.scriptsDetected)
+            put("serverPurgeVerified", if (entity.serverPurgeVerified) 1 else 0)
+            put("convertedAtEpochMs", entity.convertedAtEpochMs)
+            put("lastOpenedAtEpochMs", entity.lastOpenedAtEpochMs)
+            put("cacheHitCount", entity.cacheHitCount)
+        }
+        db.insertWithOnConflict("cached_pdfs", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun recordHit(hash: String, nowMs: Long) {
+        val db = writableDatabase
+        db.execSQL(
+            "UPDATE cached_pdfs SET cacheHitCount = cacheHitCount + 1, lastOpenedAtEpochMs = ? WHERE sha256Hash = ?",
+            arrayOf(nowMs, hash)
+        )
+    }
+
+    fun deleteByHash(hash: String) {
+        val db = writableDatabase
+        db.delete("cached_pdfs", "sha256Hash = ?", arrayOf(hash))
+    }
+
+    fun clearAll() {
+        val db = writableDatabase
+        db.delete("cached_pdfs", null, null)
     }
 }
 
 class CachedPdfRepository(
-    private val dao: CachedPdfDao,
+    private val dbHelper: CachedPdfDatabaseHelper,
     private val cacheDirectory: File
 ) {
+    private val _cachedPdfsFlow = MutableStateFlow<List<CachedPdfEntity>>(emptyList())
+    val allCachedPdfs: Flow<List<CachedPdfEntity>> = _cachedPdfsFlow.asStateFlow()
+
     init {
         if (!cacheDirectory.exists()) {
             cacheDirectory.mkdirs()
         }
+        refreshList()
     }
 
-    val allCachedPdfs: Flow<List<CachedPdfEntity>> = dao.observeAllCachedPdfs()
+    private fun refreshList() {
+        val list = dbHelper.getAllCachedPdfs()
+        _cachedPdfsFlow.value = list
+    }
 
-    suspend fun lookupValidCachedPdf(sha256Hash: String): CachedPdfEntity? {
-        val existing = dao.getBySha256(sha256Hash) ?: return null
+    suspend fun lookupValidCachedPdf(sha256Hash: String): CachedPdfEntity? = withContext(Dispatchers.IO) {
+        val existing = dbHelper.getBySha256(sha256Hash) ?: return@withContext null
         val file = File(existing.localPdfPath)
-        return if (file.exists() && file.length() > 100L) {
+        if (file.exists() && file.length() > 100L) {
             existing
         } else {
-            dao.deleteByHash(sha256Hash)
+            dbHelper.deleteByHash(sha256Hash)
+            refreshList()
             null
         }
     }
 
-    suspend fun recordCacheHit(sha256Hash: String) {
-        dao.recordCacheHit(sha256Hash, System.currentTimeMillis())
+    suspend fun recordCacheHit(sha256Hash: String) = withContext(Dispatchers.IO) {
+        dbHelper.recordHit(sha256Hash, System.currentTimeMillis())
+        refreshList()
     }
 
     fun getTargetCacheFile(sha256Hash: String): File {
@@ -105,17 +204,20 @@ class CachedPdfRepository(
         return File(cacheDirectory, "$sha256Hash.pdf")
     }
 
-    suspend fun saveConvertedPdf(entity: CachedPdfEntity) {
-        dao.insertOrReplace(entity)
+    suspend fun saveConvertedPdf(entity: CachedPdfEntity) = withContext(Dispatchers.IO) {
+        dbHelper.insertOrReplace(entity)
+        refreshList()
     }
 
-    suspend fun deleteCachedPdf(entity: CachedPdfEntity) {
+    suspend fun deleteCachedPdf(entity: CachedPdfEntity) = withContext(Dispatchers.IO) {
         runCatching { File(entity.localPdfPath).delete() }
-        dao.deleteByHash(entity.sha256Hash)
+        dbHelper.deleteByHash(entity.sha256Hash)
+        refreshList()
     }
 
-    suspend fun purgeEntireCache() {
+    suspend fun purgeEntireCache() = withContext(Dispatchers.IO) {
         cacheDirectory.listFiles()?.forEach { runCatching { it.delete() } }
-        dao.clearAll()
+        dbHelper.clearAll()
+        refreshList()
     }
 }

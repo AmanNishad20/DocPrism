@@ -11,7 +11,7 @@ import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.CachedPdfDatabase
+import com.example.data.CachedPdfDatabaseHelper
 import com.example.data.CachedPdfEntity
 import com.example.data.CachedPdfRepository
 import com.example.data.ConversionFailureReason
@@ -49,9 +49,9 @@ class DocPrismViewModel(application: Application) : AndroidViewModel(application
     private val context: Context
         get() = getApplication<Application>().applicationContext
 
-    private val database = CachedPdfDatabase.getInstance(context)
+    private val dbHelper = CachedPdfDatabaseHelper(context)
     private val cacheRepository = CachedPdfRepository(
-        dao = database.cachedPdfDao(),
+        dbHelper = dbHelper,
         cacheDirectory = File(context.filesDir, "pdf_cache_v2")
     )
     private val settingsRepository = ConversionSettingsRepository(context)
