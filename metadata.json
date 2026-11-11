@@ -1,0 +1,6 @@
+{
+  "name": "DocPrism PDF",
+  "description": "Lightweight online Office-to-PDF converter and viewer with SHA-256 offline caching, multilingual script rendering, wide spreadsheet auto-fit, and zero-retention privacy.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

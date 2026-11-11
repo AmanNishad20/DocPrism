@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">DocPrism PDF</string>
+    <string name="nav_workspace">Workspace</string>
+    <string name="nav_cache">Offline Vault</string>
+    <string name="nav_queue">Queue &amp; Limits</string>
+    <string name="nav_architecture">Server &amp; Free-Tier</string>
+    <string name="open_office_file">Open Office Document</string>
+    <string name="batch_convert_samples">Test All Formats</string>
+    <string name="offline_banner_title">Offline Mode Active</string>
+    <string name="offline_banner_subtitle">Online conversion is paused. All previously converted PDFs in your SHA-256 device cache remain ready to open offline.</string>
+    <string name="privacy_badge">TLS 1.3 • Zero Server Retention • SHA-256 Local Cache</string>
+    <string name="share_pdf">Share Converted PDF</string>
+    <string name="save_pdf">Save PDF to Device</string>
+    <string name="retry_conversion">Retry Conversion</string>
+    <string name="clear_cache">Purge Local Cache</string>
+    <string name="hero_banner_desc">DocPrism Office to PDF Encrypted Cloud Pipeline</string>
+</resources>
