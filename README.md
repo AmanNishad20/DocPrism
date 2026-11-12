@@ -19,9 +19,20 @@ DocPrism is a lightweight, mobile-first Office document viewer and PDF conversio
 
 - **Platform**: Android (Native Kotlin)
 - **UI Framework**: Jetpack Compose with Material 3
-- **Local Persistence**: Room Database (PDF metadata and SHA-256 hashes) & DataStore Preferences
+- **Local Persistence**: Android Native SQLite (`SQLiteOpenHelper`) for PDF metadata & SHA-256 cache, plus DataStore Preferences
 - **Rendering**: Android `PdfRenderer`
 - **Networking**: OkHttp & Retrofit
+
+---
+
+---
+
+## Direct APK Download
+
+A pre-built debug APK is attached directly in the repository under:
+- **`apk/DocPrism-debug.apk`**
+
+You can download and install this `.apk` directly onto your Android device or emulator.
 
 ---
 
@@ -31,27 +42,10 @@ DocPrism is a lightweight, mobile-first Office document viewer and PDF conversio
 - JDK 17
 - Android SDK (API 36 / 35, minimum API 24)
 
-### Build Commands
+### Build Command
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd <repo-folder>
-
-# Make gradlew executable
 chmod +x gradlew
-
-# Build the debug APK
 ./gradlew assembleDebug
-
-# Output APK location:
-# app/build/outputs/apk/debug/app-debug.apk
 ```
+Output location: `app/build/outputs/apk/debug/app-debug.apk`
 
----
-
-## Continuous Integration (GitHub Actions)
-
-This repository includes a GitHub Actions workflow located at `.github/workflows/build-apk.yml`.
-
-- **Triggers**: Automatic on pushes to `main` and `master`, or manual via `workflow_dispatch`.
-- **Artifacts**: Uploads `app-debug.apk` directly to the workflow summary page under **Artifacts** (kept for 14 days).
